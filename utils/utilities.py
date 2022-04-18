@@ -2,11 +2,10 @@ import datetime
 import os
 import shutil
 import csv
-
 import torch
 import numpy as np
+import pandas as pd
 import torch.nn.functional as F
-
 from tqdm import tqdm
 
 
@@ -52,15 +51,16 @@ def create_save_path(args, execution_file_path):
     :param execution_file_path: file path to the main code
     :return: Training specific directory where everything will be saved to.
     """
-    now = datetime.datetime.now().strftime("%d-%m-%Y@%H'%M")
-    master_dir = os.path.dirname(execution_file_path)
+    now = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    
     # Extract dataset file name from the full path
     dataset_name = os.path.basename(os.path.normpath(args.train_data_path)).split(".")[0]
 
     if args.store_in_folder:
-        log_path = "{}/{}/{}/{}_{}".format(master_dir, args.store_in_folder, dataset_name, args.model_size, now)
+        
+        log_path = "{}/{}/{}_{}".format(args.store_in_folder, dataset_name, args.model_size, now)
     else:
-        log_path = "{}/{}/{}_{}".format(master_dir, dataset_name, args.model_size, now)
+        log_path = "{}/{}/{}_{}".format(dataset_name, args.model_size, now)
     make_dir(log_path)
 
     # COPY OF THE MAIN CODE
@@ -111,16 +111,17 @@ def load_dataset(dataset_path):
     :param dataset_path: Dataset file path (type csv)
     :return: List of tuples where each entry contains a song and its metadata
     """
-    with open(dataset_path, encoding='utf_8') as f:
-        f = csv.reader(f)
-        output = []
-        for line in tqdm(f):
-            # Output      (genre,   artist,   year,   album,  song_name, lyrics)
-            output.append((line[0], line[1], line[2], line[3], line[4], line[5]))
+    df = pd.read_csv(dataset_path).dropna()
+    output = []
+    for idx, row in tqdm(df.iterrows()):
+        emotion = row['genre']
+        lyric = row['lyric']
+        
+        output.append((emotion, lyric))
     return output
 
 
-def format_n_tokenize_data(raw_dataset, enc):
+def format_n_tokenize_data(raw_dataset, enc, max_input_len=1024):
     """
     Seperates metadata with respective special tokens and then tokenizes the formated text
     :param raw_dataset: Text to format and style
@@ -133,21 +134,16 @@ def format_n_tokenize_data(raw_dataset, enc):
     spe = enc.added_tokens_encoder
 
     formated_data = []
-    for genre, artist, year, album, song_name, lyrics in raw_dataset:
-        ge = [spe["[s:genre]"]] + enc.encode(genre) + [spe["[e:genre]"]]
-        ar = [spe["[s:artist]"]] + enc.encode(artist) + [spe["[e:artist]"]]
-        ye = [spe["[s:year]"]] + enc.encode(year) + [spe["[e:year]"]]
-        al = [spe["[s:album]"]] + enc.encode(album) + [spe["[e:album]"]]
-        sn = [spe["[s:song_name]"]] + enc.encode(song_name) + [spe["[e:song_name]"]]
-        ly = [spe["[s:lyrics]"]] + enc.encode(lyrics) + [spe["[e:lyrics]"]]
-
-        formated_data.append((ge, ar, ye, al, sn, ly))
-
-    print("The exceeding in length inputs are removed from the dataset.")
+    for emo, lyrics in raw_dataset:
+        emo = [spe["[s:emo]"]] + enc.encode(emo) + [spe["[e:emo]"]]
+        emo_len = len(emo) # 3
+        lyric_cut_len = max_input_len - emo_len - 2 # 2 = [s:lyrics] & [e:lyrics]
+        ly = [spe["[s:lyrics]"]] + enc.encode(lyrics[:lyric_cut_len]) + [spe["[e:lyrics]"]]
+        formated_data.append((emo, ly))
     return formated_data
 
 
-def construct_input(formated_data, device, max_input_len=1024):
+def construct_input(formated_data, device, enc, max_input_len=1024):
     """
     Given a tokenized dataset, this method constructs inputs required for the GPT2 model fine-tuning.
     In particular, it creates token_type_ids & positional_ids, randomly drops lyrics' features, applies padding and
@@ -160,19 +156,15 @@ def construct_input(formated_data, device, max_input_len=1024):
              where each is of shape: (num_of_inputs * batch_size * sequence_length) -> (N, 1, 1024)
     """
     sucessfull_candidates = []
-    for genre, artist, year, album, song_name, lyrics in formated_data:
+    for emo, lyrics in formated_data:
         # 1) Prepare input partitions, i.e., token type ids & position ids
         # Token type ids, alternatively called segment ids
-        gen_seg = list([1] * len(genre))
-        art_seg = list([2] * len(artist))
-        yea_seg = list([3] * len(year))
-        alb_seg = list([4] * len(album))
-        son_seg = list([5] * len(song_name))
-        lyr_seg = list([6] * len(lyrics))
+        emo_seg = list([1] * len(emo))
+        lyr_seg = list([2] * len(lyrics))
 
         # 2) Randomly drop features for model to learn to handle subset of conditions
-        # 25% to drop all metadata but lyrics
-        if np.random.rand() <= 0.25:
+        # 10% to drop all metadata but lyrics
+        if np.random.rand() <= 0.1:
             # An integer sequence (0 -> input_len)
             position_ids = list(np.arange(0, len(lyrics)))
             curr_input = {
@@ -180,30 +172,12 @@ def construct_input(formated_data, device, max_input_len=1024):
                 "tok_type_ids": lyr_seg,
                 "pos_ids": position_ids
             }
-        # 10% of dropping the individual features
         else:
             tokens_subset = []
             segment_subset = []
 
-            if np.random.rand() > 0.1:
-                tokens_subset += genre
-                segment_subset += gen_seg
-
-            if np.random.rand() > 0.1:
-                tokens_subset += artist
-                segment_subset += art_seg
-
-            if np.random.rand() > 0.1:
-                tokens_subset += year
-                segment_subset += yea_seg
-
-            if np.random.rand() > 0.1:
-                tokens_subset += album
-                segment_subset += alb_seg
-
-            if np.random.rand() > 0.1:
-                tokens_subset += song_name
-                segment_subset += son_seg
+            tokens_subset += emo
+            segment_subset += emo_seg
 
             # Add lyrics in all cases -> add lyrics
             tokens_subset += lyrics
@@ -215,29 +189,28 @@ def construct_input(formated_data, device, max_input_len=1024):
                 "tok_type_ids": segment_subset,
                 "pos_ids": position_ids
             }
-
+        
+        
         # Get rid of songs longer than allowed size, alternatively we could cut off the excess
         if len(curr_input["tok_ids"]) > max_input_len:
+            print(len(curr_input["tok_ids"]))
             continue
-
+        
         # 3) Add padding to make the input max_input_len
         len_before_padding = len(curr_input["tok_ids"])
         padding = max_input_len - len_before_padding
 
-        curr_input["tok_ids"] += list([0] * padding)
+        curr_input["tok_ids"] += list([enc.pad_token_id] * padding)
         curr_input["tok_type_ids"] += list([0] * padding)
         curr_input["pos_ids"] += list([0] * padding)
-
-        # 4) Language Modelling Labels -> this is input_copy with padding assigned to -1,
-        #    the position shifting is done in the library code.
-        lm_labels = np.copy(curr_input["tok_ids"])
-        lm_labels[np.where(lm_labels == 0)] = -1
-
-        # 5) Attention Mask, 1 = unmasked, 0 = masked
+     
+        # 4) Attention Mask, 1 = unmasked, 0 = masked
         attention_mask = list([1] * len_before_padding) + list([0] * padding)
-
         sucessfull_candidates.append((
-            curr_input["tok_ids"], curr_input["tok_type_ids"], curr_input["pos_ids"], attention_mask, lm_labels
+            curr_input["tok_ids"], 
+            curr_input["tok_type_ids"], 
+            curr_input["pos_ids"], 
+            attention_mask
         ))
 
     # We need the model inputs separate for the DataLoader

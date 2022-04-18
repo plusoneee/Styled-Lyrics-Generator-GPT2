@@ -3,12 +3,14 @@ import argparse
 import torch
 import torch.nn.functional as F
 import numpy as np
-
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, AdamW, WarmupLinearSchedule
-from tqdm import tqdm, trange
-
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
+from tqdm import trange
 import utils.utilities as U
-# import utils.bleu as bleu
+
+"""
+how to run:
+python generating.py --load_model_dir='path/to/model_dir/'
+"""
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,7 +20,7 @@ def init_args():
     parser = argparse.ArgumentParser()
     # Model hyperparams
     parser.add_argument("--load_model_dir", type=str, default="", help="")
-    parser.add_argument("--gen_batch", type=int, default=3, help="")
+    parser.add_argument("--gen_batch", type=int, default=1, help="")
 
     args = parser.parse_args()
     return args
@@ -32,35 +34,15 @@ def get_token_types(input, enc):
     :return: A list of toke_type_ids corresponding to the input_ids
     """
     meta_dict = {
-        "genre": {
-            "st_token": "[s:genre]",
-            "end_token": "[e:genre]",
+        "emo": {
+            "st_token": "[s:emo]",
+            "end_token": "[e:emo]",
             "tok_type_id": 1
-        },
-        "artist": {
-            "st_token": "[s:artist]",
-            "end_token": "[e:artist]",
-            "tok_type_id": 2
-        },
-        "year": {
-            "st_token": "[s:year]",
-            "end_token": "[e:year]",
-            "tok_type_id": 3
-        },
-        "album": {
-            "st_token": "[s:album]",
-            "end_token": "[e:album]",
-            "tok_type_id": 4
-        },
-        "song_name": {
-            "st_token": "[s:song_name]",
-            "end_token": "[e:song_name]",
-            "tok_type_id": 5
         },
         "lyrics": {
             "st_token": "[s:lyrics]",
             "end_token": "[e:lyrics]",
-            "tok_type_id": 6
+            "tok_type_id": 2
         }
     }
 
@@ -154,7 +136,7 @@ def main():
     # Reload the model and the tokenizer
     model = GPT2LMHeadModel.from_pretrained(args.load_model_dir)
     enc = GPT2Tokenizer.from_pretrained(args.load_model_dir)
-
+    model.to(device)
     model.eval()
     U.set_seed(np.random.randint(0, 100))
     # U.set_seed(2)
@@ -163,23 +145,9 @@ def main():
     # @                    GENERATE FROM FINE-TUNED GPT2
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
-    genre = "Pop"
-    artist = "Justin Bieber"
-    year = "2015"
-    album = "Purpose"
-    song_name = "Love Yourself"
-
-    context = "[s:genre]" + genre + "[e:genre]" + \
-              "[s:artist]" + artist + "[e:artist]" + \
-              "[s:year]" + year + "[e:year]" + \
-              "[s:album]" + album + "[e:album]" + \
-              "[s:song_name]" + song_name + "[e:song_name]" + \
-              "[s:lyrics]"
-
-    context = "[s:genre]" + genre + "[e:genre]" + \
-              "[s:artist]" + artist + "[e:artist]" + \
-              "[s:lyrics]"
-
+    emotion = "Pop"
+    lyric = "For all the times that you rained on my parade"
+    context = "[s:emo]" + emotion + "[e:emo]" + "[s:lyrics]" + lyric 
     end_token = "[e:lyrics]"
 
     context = enc.encode(context)
