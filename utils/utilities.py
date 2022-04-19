@@ -8,6 +8,12 @@ import pandas as pd
 import torch.nn.functional as F
 from tqdm import tqdm
 
+def get_book_variable_in_config(cnf):
+    book = {}
+    if cnf:
+        book = {key: value for key, value in cnf.__dict__.items() if not (key.startswith('__') or key.startswith('_'))}
+    return book
+
 
 def make_dir(dir_path):
     """
@@ -43,7 +49,7 @@ def get_device(logger):
     return device, n_gpu
 
 
-def create_save_path(args, execution_file_path):
+def create_save_path(cnf, execution_file_path):
     """
     1) Constructs a model save path: "master_dir/(optional folder)/train_data_name/model_size__date)"
     2) Creates a copy of the main code.
@@ -54,13 +60,13 @@ def create_save_path(args, execution_file_path):
     now = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     
     # Extract dataset file name from the full path
-    dataset_name = os.path.basename(os.path.normpath(args.train_data_path)).split(".")[0]
+    dataset_name = os.path.basename(os.path.normpath(cnf.TRAIN_DATA_PATH)).split(".")[0]
 
-    if args.store_in_folder:
+    if cnf.STORE_IN_FOLDER:
         
-        log_path = "{}/{}/{}_{}".format(args.store_in_folder, dataset_name, args.model_size, now)
+        log_path = "{}/{}/{}_{}".format(cnf.STORE_IN_FOLDER, dataset_name, cnf.MODEL_SIZE, now)
     else:
-        log_path = "{}/{}/{}_{}".format(dataset_name, args.model_size, now)
+        log_path = "{}/{}/{}_{}".format(dataset_name, cnf.MODEL_SIZE, now)
     make_dir(log_path)
 
     # COPY OF THE MAIN CODE
@@ -68,7 +74,7 @@ def create_save_path(args, execution_file_path):
     return log_path
 
 
-def log_arguments(run_details_file_path, args, special_tokens):
+def log_arguments(run_details_file_path, special_tokens, cnf):
     """
     Saves training information to a file, like arguments and special tokens.
     :param run_details_file_path: File to be written to
@@ -81,7 +87,12 @@ def log_arguments(run_details_file_path, args, special_tokens):
     d_file = open(run_details_file_path, "a+")
     d_file.write("@" * 30 + " RUN INFO " + "@" * 30)
     d_file.write("\n\nDATE: {}".format(now))
-    d_file.write("\n\nUSING THE FOLLOWING ARGS:\n{}".format(args))
+    d_file.write("\n\nUSING THE FOLLOWING ARGS (config):\n")
+    book = get_book_variable_in_config(cnf)
+
+    for key, value in book.items():
+        d_file.write("{:<30}{:<100}\n".format(key, value))
+
     d_file.write("\n\nSPECIAL TOKENS: {}".format(special_tokens))
     d_file.close()
 
@@ -114,7 +125,7 @@ def load_dataset(dataset_path):
     df = pd.read_csv(dataset_path).dropna()
     output = []
     for idx, row in tqdm(df.iterrows()):
-        emotion = row['genre']
+        emotion = row['emotion']
         lyric = row['lyric']
         
         output.append((emotion, lyric))
@@ -256,4 +267,5 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')
         # scatter sorted tensors to original indexing
         indices_to_remove = sorted_indices_to_remove.scatter(dim=1, index=sorted_indices, src=sorted_indices_to_remove)
         logits[indices_to_remove] = filter_value
+    
     return logits

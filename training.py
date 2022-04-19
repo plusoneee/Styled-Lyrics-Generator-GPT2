@@ -9,36 +9,14 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm, trange
 import utils.utilities as U
 
+import config as cnf
+
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def init_args():
-    parser = argparse.ArgumentParser()
-    # Model hyperparams
-    parser.add_argument("--model_size", type=str, default="gpt2", help="Model size (gpt2, gpt2-medium).")
-    parser.add_argument("--store_in_folder", type=str, default="tuned_models", help="Master folder to store the model.")
-
-    # Training hyperparams
-    parser.add_argument("--train_model", action='store_true', default=True, help="Fine-tune gpt2 model.")
-    parser.add_argument("--train_data_path", type=str, default="datasets/lyrics.csv", help="Train dataset path.")
-    parser.add_argument('--num_train_epochs', type=int, default=5, help="")
-    parser.add_argument('--save_every_n_epoch', type=int, default=5, help="")
-    parser.add_argument('--train_batch_size', type=int, default=2, help="")
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help="This is equivalent to batch size, if the GPU has limited memory can be used instead.")
-
-    # Optimizer hyperparams
-    parser.add_argument('--learning_rate', type=float, default=0.0000625, help="")
-    parser.add_argument('--adam_epsilon', type=float, default=1e-8, help="Epsilon for Adam optimizer.")
-    parser.add_argument('--warmup_steps', type=int, default=0, help="")
-    parser.add_argument('--weight_decay', type=float, default=0.01, help="")
-    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm.")
-    args = parser.parse_args()
-    return args
-
-
-def prepare_train_data(args, enc, device):
-    raw_dataset = U.load_dataset(args.train_data_path)
+def prepare_train_data(enc, device):
+    raw_dataset = U.load_dataset(cnf.TRAIN_DATA_PATH)
     formated_dataset = U.format_n_tokenize_data(raw_dataset, enc)
     train_tensor_data = U.construct_input(formated_dataset, device, enc, max_input_len=enc.max_len)
 
@@ -46,15 +24,15 @@ def prepare_train_data(args, enc, device):
     # Note: the '*' extracts all elements from the list
     train_data = TensorDataset(*train_tensor_data)
     train_sampler = RandomSampler(train_data)
-    train_data_loader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
+    train_data_loader = DataLoader(train_data, sampler=train_sampler, batch_size=cnf.TRAIN_BATCH_SIZE)
     return train_data_loader
 
 
 def main():
-    args = init_args()
+    
     device, n_gpu = U.get_device(logger)
 
-    output_dir = U.create_save_path(args, __file__)
+    output_dir = U.create_save_path(cnf, __file__)
     run_details_file = os.path.join(output_dir, "run_details.txt")
     # tb_dir = os.path.join(output_dir, "all_scalars.json")
     tb_writer = SummaryWriter(output_dir)
@@ -62,49 +40,49 @@ def main():
     special_tokens_dict = {
         'additional_special_tokens':['[s:emo]', '[e:emo]', '[s:lyrics]', '[e:lyrics]']
     }
-    U.log_arguments(run_details_file, args, special_tokens_dict["additional_special_tokens"])
+    U.log_arguments(run_details_file, special_tokens_dict["additional_special_tokens"], cnf)
 
     # Initialise model & tokenizer
-    enc = GPT2Tokenizer.from_pretrained(args.model_size, pad_token='<|pad|>')
+    enc = GPT2Tokenizer.from_pretrained(cnf.MODEL_SIZE, pad_token='<|pad|>')
     enc.add_special_tokens(special_tokens_dict)
 
-    model = GPT2LMHeadModel.from_pretrained(args.model_size)
+    model = GPT2LMHeadModel.from_pretrained(cnf.MODEL_SIZE)
     model.resize_token_embeddings(len(enc))
 
     # Prepare training data
-    train_data_loader = prepare_train_data(args, enc, device)
+    train_data_loader = prepare_train_data(enc, device)
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
+        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': cnf.WEIGHT_DECAY},
         {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optimization_steps = ((len(train_data_loader) * args.num_train_epochs) // \
-                         (args.train_batch_size * args.gradient_accumulation_steps)) + 1000
+    optimization_steps = ((len(train_data_loader) * cnf.NUM_TRAIN_EPOCH) // \
+                         (cnf.TRAIN_BATCH_SIZE * cnf.GRADIENT_ACCMULATION_STPES)) + 1000
 
     # TODO: Could use NVIDIA Apex for lower precision calculations.
-    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    optimizer = AdamW(optimizer_grouped_parameters, lr=cnf.LEARNING_RATE, eps=cnf.ADAM_EPSILON)
     
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=optimization_steps)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=cnf.WARMUP_STEPS, num_training_steps=optimization_steps)
 
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     # @                            FINE-TUNE GPT2
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     
-    if args.train_model:
+    if cnf.TRAIN_MODEL:
         
         logger.info("\nFine-tuning GPT2")
         print("To visualise data using TensorBoardX -> type in console:\ntensorboard --logdir={}".format(output_dir))
         model.to(device)
         model.train()
 
-        for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
+        for epoch in trange(int(cnf.NUM_TRAIN_EPOCH), desc="Epoch"):
             past = None
             if epoch > 0:
                 # Re-process dataset since the features dropout is random.
-                train_data_loader = prepare_train_data(args, enc, device)
+                train_data_loader = prepare_train_data(enc, device)
 
             for step, batch in enumerate(tqdm(train_data_loader, desc="Training")):
                 tok_ids, tok_type_ids, pos_ids, att_mask = batch
@@ -127,16 +105,16 @@ def main():
                 tb_writer.add_scalar('loss', loss.item(), global_step)
 
                 # Normalise the loss (Simulates average of a batch)
-                loss = loss / args.gradient_accumulation_steps
+                loss = loss / cnf.GRADIENT_ACCMULATION_STPES
                 loss.backward(retain_graph=True)
 
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                if (step + 1) % cnf.GRADIENT_ACCMULATION_STPES == 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), cnf.MAX_GRAD_NORM)
                     optimizer.step()
                     scheduler.step()
                     optimizer.zero_grad()
 
-            if (epoch + 1) % args.save_every_n_epoch == 0:
+            if (epoch + 1) % cnf.SAVE_EVERY_N_EPOCH == 0:
                 save_model_dir = U.make_dir(os.path.join(output_dir, "model_epoch_" + str(epoch + 1)))
                 model.save_pretrained(save_model_dir)
                 enc.save_pretrained(save_model_dir)
