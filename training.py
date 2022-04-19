@@ -7,13 +7,12 @@ from torch.utils.data import (DataLoader, RandomSampler, TensorDataset)
 
 from tensorboardX import SummaryWriter
 from tqdm import tqdm, trange
-import utils.utilities as U
+import utilities as U
 
 import config as cnf
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 def prepare_train_data(enc, device):
     raw_dataset = U.load_dataset(cnf.TRAIN_DATA_PATH)
@@ -29,7 +28,6 @@ def prepare_train_data(enc, device):
 
 
 def main():
-    
     device, n_gpu = U.get_device(logger)
 
     output_dir = U.create_save_path(cnf, __file__)

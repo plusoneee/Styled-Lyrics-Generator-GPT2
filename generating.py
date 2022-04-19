@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from tqdm import trange
-import utils.utilities as U
+import utilities as U
 import config as cnf
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
@@ -115,9 +115,8 @@ def generate_lyrics(model, enc, gen_batch, context, end_token, device):
     return output
 
 
-def main():
+def main(lyric=None, emotion=None):
     device, n_gpu = U.get_device(logger)
-
     # Reload the model and the tokenizer
     model = GPT2LMHeadModel.from_pretrained(cnf.LOAD_MODEL_DIR)
     enc = GPT2Tokenizer.from_pretrained(cnf.LOAD_MODEL_DIR)
@@ -129,11 +128,15 @@ def main():
     # @                    GENERATE FROM FINE-TUNED GPT2
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
-    emotion = "relaxed"
-    lyric = "For all the times that you rained on my parade"
-    context = "[s:emo]" + emotion + "[e:emo]" + "[s:lyrics]" + lyric 
-    end_token = "[e:lyrics]"
-
+    if lyric is None:
+        emotion = "relaxed"
+        lyric = "For all the times that you rained on my parade"
+        context = "[s:emo]" + emotion + "[e:emo]" + "[s:lyrics]" + lyric 
+        end_token = "[e:lyrics]"
+    else:
+        context = "[s:emo]" + emotion + "[e:emo]" + "[s:lyrics]" + lyric 
+        end_token = "[e:lyrics]"
+    
     context = enc.encode(context)
     gen_batch = cnf.GEN_BATCH
 
