@@ -7,6 +7,7 @@ from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from tqdm import trange
 import utilities as U
 import config as cnf
+import os
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -114,15 +115,30 @@ def generate_lyrics(model, enc, gen_batch, context, end_token, device):
 
     return output
 
+def load_trained_model(model, tokenizer, checkpoint_dir=cnf.LOAD_MODEL_DIR):
+    checkpoint_filepath = checkpoint_dir+os.sep+'checkpoint.bin'
+    checkpoint = torch.load(checkpoint_filepath)
+    model.load_state_dict(checkpoint)
+    tokenizer.from_pretrained(checkpoint_dir)
+    return model, tokenizer
 
 def main(lyric=None, emotion=None):
+    
     device, n_gpu = U.get_device(logger)
     # Reload the model and the tokenizer
-    model = GPT2LMHeadModel.from_pretrained(cnf.LOAD_MODEL_DIR)
-    enc = GPT2Tokenizer.from_pretrained(cnf.LOAD_MODEL_DIR)
+    special_tokens_dict = {
+        'additional_special_tokens':['[s:emo]', '[e:emo]', '[s:lyrics]', '[e:lyrics]']
+    }
+
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2', pad_token='<|pad|>')
+    tokenizer.add_special_tokens(special_tokens_dict)
+    model = GPT2LMHeadModel.from_pretrained('gpt2')
+    model.resize_token_embeddings(len(tokenizer))
+    model, tokenizer = load_trained_model(model, tokenizer)
     model.to(device)
-    model.eval()
+
     U.set_seed(np.random.randint(0, 100))
+
 
     # @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     # @                    GENERATE FROM FINE-TUNED GPT2
@@ -137,13 +153,13 @@ def main(lyric=None, emotion=None):
         context = "[s:emo]" + emotion + "[e:emo]" + "[s:lyrics]" + lyric 
         end_token = "[e:lyrics]"
     
-    context = enc.encode(context)
+    context = tokenizer.encode(context)
     gen_batch = cnf.GEN_BATCH
 
-    sequence_batch = generate_lyrics(model, enc, gen_batch, context, end_token, device)
+    sequence_batch = generate_lyrics(model, tokenizer, gen_batch, context, end_token, device)
 
     for seq in sequence_batch:
-        print(enc.decode(seq))
+        print(tokenizer.decode(seq))
         print("\n---------------\n")
 
 

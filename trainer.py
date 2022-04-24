@@ -76,6 +76,7 @@ class GPT2Trainer:
         self.model.train()
         
         for epoch in trange(int(cnf.NUM_TRAIN_EPOCH), desc="Epoch"):
+            epoch_losses = []
             past = None
             if epoch > 0:
                 # Re-process dataset since the features dropout is random.
@@ -98,6 +99,7 @@ class GPT2Trainer:
                 # Log the loss to TensorBoardX
                 global_step = (epoch * len(self.train_data_loader)) + (step + 1)
                 self.tb_writer.add_scalar('loss', loss.item(), global_step)
+                epoch_losses.append(loss.item())
 
                 # Normalise the loss (Simulates average of a batch)
                 loss = loss / cnf.GRADIENT_ACCMULATION_STPES
@@ -113,7 +115,10 @@ class GPT2Trainer:
                 save_model_dir = U.make_dir(os.path.join(self.output_dir, "model_epoch_" + str(epoch + 1)))
                 self.save_trained_model(save_model_dir)
                 self.load_trained_model(save_model_dir)
-            
+        
+        avg_loss = sum(epoch_losses)/len(epoch_losses)
+        self.tb_writer.add_scalar('avg loss',avg_loss, epoch+1)
+        
         tb_dir = os.path.join(self.output_dir, "all_scalars.json")
         self.tb_writer.export_scalars_to_json(tb_dir)
         self.tb_writer.close()
